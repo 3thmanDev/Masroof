@@ -1,0 +1,75 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      # Errors are repeated as ::error:: annotations so they can be read without signing in to see the log.
+      - name: Build app (unsigned)
+        run: |
+          xcodebuild \
+            -project Masroof.xcodeproj \
+            -scheme Masroof \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build > xcodebuild.log 2>&1 || {
+              grep -E "error:" xcodebuild.log | sort -u | head -10 | sed 's/^/::error::/'
+              tail -40 xcodebuild.log
+              exit 1
+            }
+
+      # Ad-hoc signature only so signing tools accept the binary; your store re-signs it.
+      - name: Package IPA
+        run: |
+          APP_PATH="build/Build/Products/Release-iphoneos/Masroof.app"
+          # Without a launch screen iOS runs the app letterboxed at the old 3.5" size.
+          test -d "$APP_PATH/LaunchScreen.storyboardc"
+          plutil -p "$APP_PATH/Info.plist" | grep UILaunch
+          codesign --force --sign - --timestamp=none "$APP_PATH"
+          mkdir -p output/Payload
+          cp -R "$APP_PATH" output/Payload/
+          cd output
+          zip -qry Masroof.ipa Payload
+          ls -lh Masroof.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Masroof-ipa
+          path: output/Masroof.ipa
+
+      - name: Check budget math
+        if: always()
+        run: |
+          swiftc Masroof/Budget.swift Masroof/DateText.swift Tests/main.swift -o budget-check > swiftc.log 2>&1 || {
+            grep -E "error:" swiftc.log | head -10 | sed 's/^/::error::/'
+            cat swiftc.log
+            exit 1
+          }
+          ./budget-check > budget.log 2>&1 || {
+            grep -E "FAIL|failed" budget.log | head -10 | sed 's/^/::error::/'
+            cat budget.log
+            exit 1
+          }
+          cat budget.log
+          echo "::notice::$(tail -1 budget.log)"
+          echo "::notice::$(grep samples budget.log)"
