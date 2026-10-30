@@ -83,6 +83,8 @@ struct Expense: Codable, Identifiable, Equatable {
     /// When it was written down. Only entries after `BudgetState.balanceAt` come off the balance.
     var at: Date
     var kind: Kind = .daily
+    /// What was in the basket, when the expense came from the scanner.
+    var items: [BasketItem]? = nil
 }
 
 struct BudgetState: Codable, Equatable {

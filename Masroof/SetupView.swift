@@ -1,9 +1,9 @@
 import SwiftUI
+import UIKit
 
-/// The money on hand, the period it has to cover, and what is set aside from it.
-struct SetupSheet: View {
+/// The money on hand, the period it has to cover, what is set aside from it, and the daily reminder.
+struct SetupView: View {
     @EnvironmentObject private var store: BudgetStore
-    @Environment(\.dismiss) private var dismiss
     @State private var balanceText = ""
     @State private var savingsText = ""
     @State private var billName = ""
@@ -148,6 +148,32 @@ struct SetupSheet: View {
                 }
 
                 Section {
+                    Toggle("ذكّرني كل يوم", isOn: reminderOnBinding)
+                    if store.reminder.isOn {
+                        DatePicker("الوقت", selection: reminderTimeBinding, displayedComponents: .hourAndMinute)
+                    }
+                    if store.remindersBlocked {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("التنبيهات مقفلة لمصروفي من إعدادات الجوال، فما راح يوصلك شي.")
+                                .font(.cairo(14))
+                                .foregroundColor(Theme.bad)
+                            Button("افتح الإعدادات") {
+                                if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+                                    UIApplication.shared.open(url)
+                                }
+                            }
+                            .font(.cairo(15, .bold))
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                } header: {
+                    SectionTitle("تنبيه يومي")
+                } footer: {
+                    Text("كل يوم بهالوقت يجيك تنبيه بكم تقدر تصرف اليوم، ويتحدّث كل ما سجلت مصروف.")
+                        .font(.cairo(13))
+                }
+
+                Section {
                     Button(role: .destructive) {
                         confirmReset = true
                     } label: {
@@ -161,10 +187,6 @@ struct SetupSheet: View {
             .navigationTitle("فلوسك")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("تم") { dismiss() }
-                        .font(.cairo(17, .bold))
-                }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("تم") { focus = nil }
@@ -179,8 +201,7 @@ struct SetupSheet: View {
                 Button("إلغاء", role: .cancel) {}
             }
         }
-        .overlay(alignment: .bottom) { ToastView() }
-        .animation(.easeOut(duration: 0.25), value: store.toast?.id)
+        .withToast()
         .onAppear(perform: syncFields)
         .onChange(of: balanceText) { text in
             let amount = Money.parse(text)
@@ -196,6 +217,30 @@ struct SetupSheet: View {
         Binding(
             get: { Days.date(store.state.endDate) },
             set: { store.setEndDate(Days.key($0)) }
+        )
+    }
+
+    private var reminderOnBinding: Binding<Bool> {
+        Binding(
+            get: { store.reminder.isOn },
+            set: { on in
+                var settings = store.reminder
+                settings.isOn = on
+                store.setReminder(settings)
+            }
+        )
+    }
+
+    private var reminderTimeBinding: Binding<Date> {
+        Binding(
+            get: { ReminderPlan.fireDate(day: store.today, hour: store.reminder.hour, minute: store.reminder.minute) },
+            set: { date in
+                let time = Days.calendar.dateComponents([.hour, .minute], from: date)
+                var settings = store.reminder
+                settings.hour = time.hour ?? 9
+                settings.minute = time.minute ?? 0
+                store.setReminder(settings)
+            }
         )
     }
 

@@ -60,7 +60,7 @@ jobs:
       - name: Check budget math
         if: always()
         run: |
-          swiftc Masroof/Budget.swift Masroof/DateText.swift Tests/main.swift -o budget-check > swiftc.log 2>&1 || {
+          swiftc Masroof/Budget.swift Masroof/Basket.swift Masroof/Reminder.swift Masroof/DateText.swift Tests/main.swift -o budget-check > swiftc.log 2>&1 || {
             grep -E "error:" swiftc.log | head -10 | sed 's/^/::error::/'
             cat swiftc.log
             exit 1
@@ -73,3 +73,4 @@ jobs:
           cat budget.log
           echo "::notice::$(tail -1 budget.log)"
           echo "::notice::$(grep samples budget.log)"
+          echo "::notice::$(grep reminder: budget.log)"

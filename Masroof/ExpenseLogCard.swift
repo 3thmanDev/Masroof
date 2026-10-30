@@ -82,31 +82,73 @@ struct ExpenseRow: View {
     /// Written down before the balance was last typed in, so it is already part of that balance.
     let alreadyInBalance: Bool
     let onDelete: () -> Void
+    @State private var expanded = false
+
+    private var items: [BasketItem] { expense.items ?? [] }
 
     var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                Text(expense.note.isEmpty ? "مصروف" : expense.note)
-                    .font(.cairo(16))
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Button {
+                    if !items.isEmpty { expanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(expense.note.isEmpty ? "مصروف" : expense.note)
+                            .font(.cairo(16))
+                            .foregroundColor(alreadyInBalance ? Theme.secondary : Theme.ink)
+                            .lineLimit(1)
+                        if !items.isEmpty {
+                            Tag(text: Basket.countText(items.reduce(0) { $0 + $1.quantity }))
+                            Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(Theme.secondary)
+                        }
+                        if expense.kind == .bill { Tag(text: "التزام") }
+                        if alreadyInBalance { Tag(text: "قبل تحديث المبلغ") }
+                        Spacer(minLength: 6)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Text(Money.text(expense.amount))
+                    .font(.cairo(16, .bold))
                     .foregroundColor(alreadyInBalance ? Theme.secondary : Theme.ink)
-                    .lineLimit(1)
-                if expense.kind == .bill { Tag(text: "التزام") }
-                if alreadyInBalance { Tag(text: "قبل تحديث المبلغ") }
+                Button(action: onDelete) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Theme.secondary)
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(Theme.field))
+                }
+                .buttonStyle(PressableStyle())
+                .accessibilityLabel("احذف \(expense.note.isEmpty ? "المصروف" : expense.note) \(Money.text(expense.amount))")
             }
-            Spacer(minLength: 6)
-            Text(Money.text(expense.amount))
-                .font(.cairo(16, .bold))
-                .foregroundColor(alreadyInBalance ? Theme.secondary : Theme.ink)
-            Button(action: onDelete) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(Theme.secondary)
-                    .frame(width: 34, height: 34)
-                    .background(Circle().fill(Theme.field))
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(items) { item in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("\(item.quantity)×")
+                                .font(.cairo(13.5, .semibold))
+                                .foregroundColor(Theme.secondary)
+                                .frame(minWidth: 26, alignment: .leading)
+                            Text(item.name)
+                                .font(.cairo(14))
+                                .lineLimit(2)
+                            Spacer(minLength: 6)
+                            Text(Money.text(item.total))
+                                .font(.cairo(14, .semibold))
+                        }
+                    }
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.field))
+                .padding(.bottom, 4)
+                .transition(.opacity)
             }
-            .buttonStyle(PressableStyle())
-            .accessibilityLabel("احذف \(expense.note.isEmpty ? "المصروف" : expense.note) \(Money.text(expense.amount))")
         }
         .padding(.vertical, 8)
+        .animation(.easeOut(duration: 0.2), value: expanded)
     }
 }

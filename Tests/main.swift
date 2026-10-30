@@ -1,5 +1,5 @@
 // Checks the budget math and both calendars on the build machine before the app is built:
-// swiftc Masroof/Budget.swift Masroof/DateText.swift Tests/main.swift -o budget-check && ./budget-check
+// swiftc Masroof/Budget.swift Masroof/Basket.swift Masroof/Reminder.swift Masroof/DateText.swift Tests/main.swift -o budget-check && ./budget-check
 
 import Foundation
 
@@ -123,6 +123,73 @@ expect(DateText.days(1), "يوم واحد", "one day")
 expect(DateText.days(2), "يومين", "two days")
 expect(DateText.days(5), "5 أيام", "a few days")
 expect(DateText.days(32), "32 يوم", "many days")
+
+// The shopping basket: the same barcode twice is one line with two of it.
+var basket = Basket()
+basket.add(barcode: "6281007025019", name: "حليب", price: 7.5)
+basket.add(barcode: "6281100110017", name: "خبز", price: 2)
+let milk = basket.add(barcode: "6281007025019", name: "حليب", price: 7.5)
+basket.add(barcode: nil, name: "طماط", price: 6.25, quantity: 2)
+basket.add(barcode: nil, name: "طماط", price: 6.25)
+expect(basket.items.count, 4, "loose items without a barcode stay separate")
+expect(milk.quantity, 2, "second scan adds one more")
+expect(basket.items.filter { $0.barcode == "6281007025019" }.count, 1, "rescanned item keeps one line")
+expect(basket.items[2].id, milk.id, "rescanned item moves above the bread")
+expect(basket.count, 6, "items counted with quantities")
+near(basket.total, 7.5 * 2 + 2 + 6.25 * 3, "basket total")
+basket.setQuantity(0, of: milk.id)
+expect(basket.items.contains { $0.id == milk.id }, false, "zero takes it out")
+expect(Basket.countText(1), "غرض واحد", "one item")
+expect(Basket.countText(2), "غرضين", "two items")
+expect(Basket.countText(4), "4 أغراض", "a few items")
+expect(Basket.countText(15), "15 غرض", "many items")
+
+// What a basket does to today's limit: 1,000 over 10 days is 100 a day.
+var shopPlan = overPlan
+shopPlan.expenses = []
+let shop = BudgetMath.summary(shopPlan, today: "2026-11-01")
+let small = BudgetMath.purchase(60, shop)
+expect(small.fits, true, "60 fits in 100")
+near(small.leftToday, 40, "40 left after a 60 basket")
+near(small.futureDaily, 100, "later days unchanged when it fits")
+let big = BudgetMath.purchase(150, shop)
+expect(big.fits, false, "150 goes over 100")
+near(big.leftToday, -50, "50 over")
+near(big.futureDaily, 94.44, "850 over the 9 days after")
+
+// Product names from Open Food Facts.
+expect(ProductName.from(arabic: "حليب طازج", name: "Fresh Milk", brand: "Almarai,المراعي", quantity: "1 L"), "Almarai حليب طازج 1 L", "Arabic name first, brand and size added")
+expect(ProductName.from(arabic: nil, name: "Almarai Fresh Milk", brand: "almarai", quantity: nil), "Almarai Fresh Milk", "brand already in the name")
+expect(ProductName.from(arabic: "", name: "", brand: "Nadec", quantity: "200 ml"), "Nadec 200 ml", "brand alone")
+expect(ProductName.from(arabic: nil, name: nil, brand: nil, quantity: "1 kg"), nil, "no name at all")
+
+// Old saved expenses have no basket and still load.
+let plainExpense = Expense(amount: 5, note: "قهوة", day: "2026-11-01", at: Days.date("2026-11-01"))
+let plainData = try! JSONEncoder().encode(plainExpense)
+expect(String(data: plainData, encoding: .utf8)!.contains("items"), false, "no items key without a basket")
+expect(try! JSONDecoder().decode(Expense.self, from: plainData), plainExpense, "expense without items decodes")
+let basketExpense = Expense(amount: 9.5, note: "بقالة", day: "2026-11-01", at: Days.date("2026-11-01"), items: basket.items)
+expect(try! JSONDecoder().decode(Expense.self, from: JSONEncoder().encode(basketExpense)), basketExpense, "basket expense round trip")
+
+// The daily reminder, worked out ahead.
+var livePlan = examplePlan
+livePlan.isExample = false
+let eight = Days.date("2026-10-30").addingTimeInterval(-4 * 3600)
+let reminders = ReminderPlan.messages(livePlan, now: eight, hour: 9, minute: 0)
+expect(reminders.count, 30, "a month of reminders is capped at 30")
+expect(reminders.first?.day, "2026-10-30", "before 9 the first one is today")
+expect(reminders.first?.title, "باقي لك تصرف اليوم 55 ريال", "today counts what was already spent")
+expect(reminders.dropFirst().first?.title, "تقدر تصرف اليوم 73 ريال", "tomorrow's limit")
+let ten = Days.date("2026-10-30").addingTimeInterval(-2 * 3600)
+expect(ReminderPlan.messages(livePlan, now: ten, hour: 9, minute: 0).first?.day, "2026-10-31", "after 9 the first one is tomorrow")
+let lastDays = ReminderPlan.messages(overPlan, now: Days.date("2026-11-08"), hour: 9, minute: 0)
+expect(lastDays.map(\.day), ["2026-11-09", "2026-11-10", "2026-11-11"], "two days left, then the period is over")
+expect(lastDays[1].body, "اليوم آخر يوم بالفترة.", "last day")
+expect(lastDays[2].title, "خلصت الفترة", "the morning after asks for new money")
+expect(ReminderPlan.messages(examplePlan, now: eight, hour: 9, minute: 0).isEmpty, true, "no reminders for the example")
+expect(ReminderPlan.messages(blank, now: eight, hour: 9, minute: 0).isEmpty, true, "no reminders before any money")
+expect(ReminderPlan.messages(shortPlan, now: Days.date("2026-11-01"), hour: 20, minute: 0).map(\.title), ["مصروفك ما يكفي"], "one warning when the money is short")
+print("reminder: \(reminders[0].title) | \(reminders[0].body)")
 
 print("samples: \(DateText.long(october30)) | \(DateText.hijriFull(october30)) | \(DateText.both(november30)) | \(DateText.span(from: october30, to: november30, hijri: false)) | \(DateText.span(from: october30, to: november30, hijri: true))")
 print("\(checks - failures)/\(checks) budget checks passed")

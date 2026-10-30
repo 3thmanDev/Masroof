@@ -1,11 +1,51 @@
 import SwiftUI
 import UIKit
 
-struct HomeView: View {
+enum AppTab: Hashable {
+    case today, basket, log, money
+}
+
+/// The four tabs along the bottom: today's limit, the shopping basket, the spending log, and the money settings.
+struct RootView: View {
     @EnvironmentObject private var store: BudgetStore
     @Environment(\.scenePhase) private var scenePhase
-    @State private var showSetup = false
+    @State private var tab = AppTab.today
     private let clock = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        TabView(selection: Binding(get: { tab }, set: select)) {
+            HomeView(openSetup: { select(.money) })
+                .tabItem { Label("اليوم", systemImage: "sun.max.fill") }
+                .tag(AppTab.today)
+            BasketView()
+                .tabItem { Label("السلة", systemImage: "barcode.viewfinder") }
+                .tag(AppTab.basket)
+            LogView()
+                .tabItem { Label("السجل", systemImage: "list.bullet.rectangle") }
+                .tag(AppTab.log)
+            SetupView()
+                .tabItem { Label("فلوسك", systemImage: "banknote") }
+                .tag(AppTab.money)
+        }
+        .onReceive(clock) { _ in store.refreshDay() }
+        .onChange(of: scenePhase) { phase in
+            guard phase == .active else { return }
+            store.refreshDay()
+            store.scheduleReminders()
+        }
+        .task { store.scheduleReminders() }
+    }
+
+    /// The example is only a preview, so opening the money tab starts from the person's own numbers.
+    private func select(_ next: AppTab) {
+        if next == .money && store.state.isExample { store.startFresh() }
+        tab = next
+    }
+}
+
+struct HomeView: View {
+    @EnvironmentObject private var store: BudgetStore
+    let openSetup: () -> Void
 
     var body: some View {
         NavigationStack {
@@ -18,7 +58,6 @@ struct HomeView: View {
                     HeroCard(onEdit: openSetup)
                     AddExpenseCard()
                     CalendarCard()
-                    ExpenseLogCard()
                     Text("طريقة الحساب: (اللي معك − المحجوز) ÷ الأيام الباقية مع اليوم. إذا صرفت اليوم أقل من حدّك، يرتفع حدّك للأيام الجاية، وإذا صرفت أكثر ينزل.")
                         .font(.cairo(13))
                         .foregroundColor(Theme.secondary)
@@ -32,31 +71,9 @@ struct HomeView: View {
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.background.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("تم") { hideKeyboard() }
-                        .font(.cairo(17, .bold))
-                }
-            }
+            .keyboardDoneButton()
         }
-        .overlay(alignment: .bottom) { ToastView() }
-        .animation(.easeOut(duration: 0.25), value: store.toast?.id)
-        .sheet(isPresented: $showSetup) {
-            SetupSheet()
-                .environmentObject(store)
-                .appEnvironment()
-        }
-        .onReceive(clock) { _ in store.refreshDay() }
-        .onChange(of: scenePhase) { phase in
-            if phase == .active { store.refreshDay() }
-        }
-    }
-
-    /// The example is only a preview, so editing the money starts from the person's own numbers.
-    private func openSetup() {
-        if store.state.isExample { store.startFresh() }
-        showSetup = true
+        .withToast()
     }
 
     private var header: some View {
@@ -85,8 +102,64 @@ struct HomeView: View {
     }
 }
 
+/// Every expense, newest day first, with the items of each scanned basket.
+struct LogView: View {
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("السجل")
+                            .font(.cairo(28, .bold))
+                        Text("كل مصاريفك، واضغط على أي سلة تشوف أغراضها.")
+                            .font(.cairo(14))
+                            .foregroundColor(Theme.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
+                    ExpenseLogCard()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 24)
+            }
+            .background(Theme.background.ignoresSafeArea())
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .withToast()
+    }
+}
+
 func hideKeyboard() {
     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+}
+
+extension View {
+    /// A "تم" button above the number pad, which has no return key.
+    func keyboardDoneButton() -> some View {
+        toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("تم") { hideKeyboard() }
+                    .font(.cairo(17, .bold))
+            }
+        }
+    }
+
+    /// The undo message, sitting just above the tab bar.
+    func withToast() -> some View {
+        modifier(ToastLayer())
+    }
+}
+
+struct ToastLayer: ViewModifier {
+    @EnvironmentObject private var store: BudgetStore
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .bottom) { ToastView() }
+            .animation(.easeOut(duration: 0.25), value: store.toast?.id)
+    }
 }
 
 struct ExampleBanner: View {
@@ -120,7 +193,8 @@ struct ToastView: View {
                     .lineLimit(2)
                 if let undo = toast.undo {
                     Button {
-                        store.restore(undo)
+                        undo()
+                        store.toast = nil
                     } label: {
                         Text("تراجع")
                             .font(.cairo(15, .bold))
